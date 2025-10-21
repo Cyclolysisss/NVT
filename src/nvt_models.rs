@@ -10,7 +10,7 @@
 
 use reqwest::blocking;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use gtfs_rt::FeedMessage;
 use prost::Message;
 use chrono::{DateTime, TimeZone, Utc};
@@ -32,8 +32,8 @@ pub struct AlertInfo {
     pub text: String,
     pub description: String,
     pub url: Option<String>,
-    pub route_ids: Vec<String>,  // NEW: Track which routes this alert affects
-    pub stop_ids: Vec<String>,   // NEW: Track which stops this alert affects
+    pub route_ids: Vec<String>,
+    pub stop_ids: Vec<String>,
     pub active_period_start: Option<i64>,
     pub active_period_end: Option<i64>,
     pub severity: u32,
@@ -87,9 +87,9 @@ pub struct NetworkData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GTFSCache {
-    pub routes: HashMap<String, String>,  // route_id -> color
-    pub stops: Vec<(String, String, f64, f64)>,  // stop_id, name, lat, lon
-    pub cached_at: u64,  // Unix timestamp
+    pub routes: HashMap<String, String>,
+    pub stops: Vec<(String, String, f64, f64)>,
+    pub cached_at: u64,
 }
 
 impl GTFSCache {
@@ -168,13 +168,10 @@ impl GTFSCache {
 
 #[derive(Debug, Clone)]
 pub struct CachedNetworkData {
-    // Static data (rarely changes)
     pub stops_metadata: Vec<(String, String, f64, f64, Vec<String>)>,
     pub lines_metadata: Vec<(String, String, String, Vec<(String, String)>)>,
     pub line_colors: HashMap<String, String>,
     pub last_static_update: u64,
-
-    // Dynamic data (frequently updates)
     pub alerts: Vec<AlertInfo>,
     pub real_time: Vec<RealTimeInfo>,
     pub trip_updates: Vec<gtfs_rt::TripUpdate>,
@@ -257,15 +254,10 @@ pub struct NVTModels;
 impl NVTModels {
     const API_KEY: &'static str = "opendata-bordeaux-metropole-flux-gtfs-rt";
     const BASE_URL: &'static str = "https://bdx.mecatran.com/utw/ws";
-
-    // Cache refresh intervals (in seconds)
-    const STATIC_DATA_MAX_AGE: u64 = 3600; // 1 hour for stops/lines
-    const DYNAMIC_DATA_MAX_AGE: u64 = 30;   // 30 seconds for real-time
-
-    // Request timeout
+    const STATIC_DATA_MAX_AGE: u64 = 3600;
+    const DYNAMIC_DATA_MAX_AGE: u64 = 30;
     const REQUEST_TIMEOUT_SECS: u64 = 15;
 
-    /// Initialize cached data with full fetch
     pub fn initialize_cache() -> Result<CachedNetworkData> {
         println!("🔄 Initializing network data cache...");
         println!("   This may take a moment...");
@@ -326,7 +318,6 @@ impl NVTModels {
         })
     }
 
-    /// Refresh only dynamic data (real-time, alerts)
     pub fn refresh_dynamic_data(cache: &mut CachedNetworkData) -> Result<()> {
         cache.alerts = Self::fetch_alerts().unwrap_or_else(|e| {
             eprintln!("⚠️  Warning: Could not fetch alerts ({})", e);
@@ -351,7 +342,6 @@ impl NVTModels {
         Ok(())
     }
 
-    /// Refresh only static data (stops, lines, colors)
     pub fn refresh_static_data(cache: &mut CachedNetworkData) -> Result<()> {
         println!("🔄 Refreshing static network data...");
 
@@ -369,12 +359,9 @@ impl NVTModels {
         Ok(())
     }
 
-    /// Smart refresh: only updates what's needed
     pub fn smart_refresh(cache: &mut CachedNetworkData) -> Result<()> {
-        // Always refresh dynamic data for real-time updates
         Self::refresh_dynamic_data(cache)?;
 
-        // Only refresh static data if it's stale
         if cache.needs_static_refresh(Self::STATIC_DATA_MAX_AGE) {
             Self::refresh_static_data(cache)?;
         }
@@ -382,7 +369,6 @@ impl NVTModels {
         Ok(())
     }
 
-    /// Fetch stop points from SIRI API with better error handling
     fn fetch_stops() -> Result<Vec<(String, String, f64, f64, Vec<String>)>> {
         let url = format!(
             "{}/siri/2.0/bordeaux/stoppoints-discovery.json?AccountKey={}",
@@ -441,7 +427,6 @@ impl NVTModels {
         Ok(stops)
     }
 
-    /// Fetch lines from SIRI API with better error handling
     fn fetch_lines() -> Result<Vec<(String, String, String, Vec<(String, String)>)>> {
         let url = format!(
             "{}/siri/2.0/bordeaux/lines-discovery.json?AccountKey={}",
@@ -502,7 +487,6 @@ impl NVTModels {
         Ok(lines)
     }
 
-    /// Fetch alerts from GTFS-RT API with route_id extraction
     fn fetch_alerts() -> Result<Vec<AlertInfo>> {
         let url = format!(
             "{}/gtfsfeed/alerts/bordeaux?apiKey={}",
@@ -544,7 +528,6 @@ impl NVTModels {
                         .url
                         .and_then(|u| u.translation.first().map(|t| t.text.clone()));
 
-                    // Extract route_ids and stop_ids from informed_entity
                     let mut route_ids = Vec::new();
                     let mut stop_ids = Vec::new();
 
@@ -553,13 +536,11 @@ impl NVTModels {
                             route_ids.push(route_id);
                         }
                         if let Some(stop_id) = informed_entity.stop_id {
-                            if let Some(extracted_id) = Self::extract_stop_id(&stop_id) {
-                                stop_ids.push(extracted_id);
-                            }
+                            // Use raw stop_id directly for alerts
+                            stop_ids.push(stop_id);
                         }
                     }
 
-                    // Get active period
                     let (start, end) = alert.active_period
                         .first()
                         .map(|period| {
@@ -590,7 +571,6 @@ impl NVTModels {
         Ok(alerts)
     }
 
-    /// Fetch vehicle positions from GTFS-RT API
     fn fetch_vehicle_positions() -> Result<Vec<RealTimeInfo>> {
         let url = format!(
             "{}/gtfsfeed/vehicles/bordeaux?apiKey={}",
@@ -651,7 +631,8 @@ impl NVTModels {
                         .map(|p| (p.latitude as f64, p.longitude as f64))
                         .unwrap_or((0.0, 0.0));
 
-                    let stop_id = vehicle.stop_id.as_ref().and_then(|id| Self::extract_stop_id(id));
+                    // Use raw stop_id - no extraction needed for vehicles
+                    let stop_id = vehicle.stop_id.clone();
                     let timestamp = vehicle.timestamp.map(|ts| ts as i64);
 
                     RealTimeInfo {
@@ -673,7 +654,6 @@ impl NVTModels {
         Ok(real_time)
     }
 
-    /// Fetch trip updates from GTFS-RT API
     fn fetch_trip_updates() -> Result<Vec<gtfs_rt::TripUpdate>> {
         let url = format!(
             "{}/gtfsfeed/realtime/bordeaux?apiKey={}",
@@ -705,19 +685,16 @@ impl NVTModels {
         Ok(updates)
     }
 
-    /// Download and extract routes.txt from GTFS zip file with 15-day caching
     fn download_and_read_routes() -> Result<HashMap<String, String>> {
-        // Try to load from cache first
         if let Some(cache) = GTFSCache::load() {
             return Ok(cache.routes);
         }
 
-        // Cache miss or expired - download fresh data
         println!("📥 Downloading fresh GTFS data (this may take a moment)...");
         let gtfs_url = "https://transport.data.gouv.fr/resources/83024/download";
 
         let client = blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60)) // Longer timeout for large file
+            .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| NVTError::NetworkError(format!("Failed to create HTTP client: {}", e)))?;
 
@@ -738,7 +715,6 @@ impl NVTModels {
         let mut archive = ZipArchive::new(cursor)
             .map_err(|e| NVTError::ParseError(format!("Failed to open GTFS zip archive: {}", e)))?;
 
-        // Extract routes.txt
         let mut routes_file = archive.by_name("routes.txt")
             .map_err(|e| NVTError::FileError(format!("routes.txt not found in GTFS archive: {}", e)))?;
 
@@ -748,7 +724,6 @@ impl NVTModels {
 
         drop(routes_file);
 
-        // Extract stops.txt for future use
         let stops_contents = match archive.by_name("stops.txt") {
             Ok(mut file) => {
                 let mut contents = String::new();
@@ -758,7 +733,6 @@ impl NVTModels {
             Err(_) => None,
         };
 
-        // Parse routes.txt
         let mut color_map = HashMap::new();
         let mut rdr = csv::Reader::from_reader(routes_contents.as_bytes());
 
@@ -777,7 +751,6 @@ impl NVTModels {
             }
         }
 
-        // Parse stops.txt if available
         let mut stops_data = Vec::new();
         if let Some(contents) = stops_contents {
             let mut stops_rdr = csv::Reader::from_reader(contents.as_bytes());
@@ -799,7 +772,6 @@ impl NVTModels {
             }
         }
 
-        // Create and save cache
         let cache = GTFSCache {
             routes: color_map.clone(),
             stops: stops_data,
@@ -819,12 +791,11 @@ impl NVTModels {
         Ok(color_map)
     }
 
-    /// Load line colors from GTFS routes.txt (with caching)
     fn load_line_colors() -> Result<HashMap<String, String>> {
         Self::download_and_read_routes()
     }
 
-    /// Build complete network data with all associations
+    /// Build complete network data with all associations - OPTIMIZED
     pub fn build_network_data(
         stops_data: Vec<(String, String, f64, f64, Vec<String>)>,
         lines_data: Vec<(String, String, String, Vec<(String, String)>)>,
@@ -841,23 +812,65 @@ impl NVTModels {
             })
             .collect();
 
-        // Create a map of line_code to line_id for alert matching
-        let line_code_to_id_map: HashMap<String, String> = lines_data
-            .iter()
-            .filter_map(|(ref_, _, code, _)| {
-                let line_id = Self::extract_line_id(ref_)?;
-                Some((code.clone(), line_id.to_string()))
-            })
-            .collect();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        // Allow arrivals up to 2 minutes in the past (grace period for vehicles at stop)
+        let grace_period = 120; // seconds
+        let cutoff_time = now - grace_period;
+
+        let mut trip_updates_by_stop: HashMap<String, Vec<(String, Option<String>, Option<u32>, Option<i32>, Option<i64>)>> = HashMap::new();
+
+        for trip_update in &trip_updates {
+            let trip_id = trip_update.trip.trip_id.clone().unwrap_or_else(|| "Unknown".to_string());
+            let route_id = trip_update.trip.route_id.clone();
+            let direction_id = trip_update.trip.direction_id;
+
+            for stu in &trip_update.stop_time_update {
+                if let Some(stop_id_raw) = &stu.stop_id {
+                    let delay = stu.arrival.as_ref().and_then(|a| a.delay)
+                        .or_else(|| stu.departure.as_ref().and_then(|d| d.delay));
+                    let time = stu.arrival.as_ref().and_then(|a| a.time)
+                        .or_else(|| stu.departure.as_ref().and_then(|d| d.time))
+                        .map(|t| t as i64);
+
+                    if let Some(arrival_time) = time {
+                        // Include arrivals within grace period OR in the future
+                        if arrival_time >= cutoff_time {
+                            let data = (
+                                trip_id.clone(),
+                                route_id.clone(),
+                                direction_id,
+                                delay,
+                                time,
+                            );
+
+                            // Index by raw stop_id (e.g., "5220")
+                            trip_updates_by_stop
+                                .entry(stop_id_raw.clone())
+                                .or_insert_with(Vec::new)
+                                .push(data.clone());
+
+                            // ALSO index by extracted stop_id (in case SIRI uses different format)
+                            if let Some(extracted) = Self::extract_stop_id(stop_id_raw) {
+                                if extracted != *stop_id_raw {
+                                    trip_updates_by_stop
+                                        .entry(extracted)
+                                        .or_insert_with(Vec::new)
+                                        .push(data);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         let stops: Vec<Stop> = stops_data
             .into_iter()
             .map(|(id, name, lat, lon, line_refs)| {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64;
-
                 let mut stop_rt: Vec<RealTimeInfo> = real_time
                     .iter()
                     .filter(|rt| {
@@ -869,85 +882,55 @@ impl NVTModels {
                     .cloned()
                     .collect();
 
-                // Fallback to trip updates if no real-time data
-                if stop_rt.is_empty() {
-                    for trip_update in &trip_updates {
-                        for stu in &trip_update.stop_time_update {
-                            if let Some(stop_id) = &stu.stop_id {
-                                if let Some(extracted_id) = Self::extract_stop_id(stop_id) {
-                                    if extracted_id == id {
-                                        let trip_id = trip_update
-                                            .trip
-                                            .trip_id
-                                            .clone()
-                                            .unwrap_or_else(|| "Unknown".to_string());
-                                        let route_id = trip_update.trip.route_id.clone();
-                                        let direction_id = trip_update.trip.direction_id;
+                // Add trip updates (scheduled arrivals)
+                if let Some(scheduled_arrivals) = trip_updates_by_stop.get(&id) {
+                    for (trip_id, route_id, direction_id, delay, time) in scheduled_arrivals {
+                        let destination = route_id.as_ref().and_then(|rid| {
+                            line_destinations_map.get(rid).and_then(|destinations| {
+                                direction_id.and_then(|dir_id| {
+                                    destinations.iter()
+                                        .find(|(dir_ref, _)| dir_ref == &dir_id.to_string())
+                                        .map(|(_, place)| place.clone())
+                                })
+                            })
+                        });
 
-                                        let destination = route_id.as_ref().and_then(|rid| {
-                                            line_destinations_map.get(rid).and_then(|destinations| {
-                                                direction_id.and_then(|dir_id| {
-                                                    destinations.iter()
-                                                        .find(|(dir_ref, _)| dir_ref == &dir_id.to_string())
-                                                        .map(|(_, place)| place.clone())
-                                                })
-                                            })
-                                        });
-
-                                        let delay = stu
-                                            .arrival
-                                            .as_ref()
-                                            .and_then(|a| a.delay)
-                                            .or_else(|| stu.departure.as_ref().and_then(|d| d.delay));
-                                        let time = stu
-                                            .arrival
-                                            .as_ref()
-                                            .and_then(|a| a.time)
-                                            .or_else(|| stu.departure.as_ref().and_then(|d| d.time))
-                                            .map(|t| t as i64);
-
-                                        // Only include future arrivals
-                                        if let Some(arrival_time) = time {
-                                            if arrival_time >= now {
-                                                stop_rt.push(RealTimeInfo {
-                                                    vehicle_id: "scheduled".to_string(),
-                                                    trip_id,
-                                                    route_id,
-                                                    direction_id,
-                                                    destination,
-                                                    latitude: lat,
-                                                    longitude: lon,
-                                                    stop_id: Some(extracted_id.clone()),
-                                                    timestamp: time,
-                                                    delay,
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        stop_rt.push(RealTimeInfo {
+                            vehicle_id: "scheduled".to_string(),
+                            trip_id: trip_id.clone(),
+                            route_id: route_id.clone(),
+                            direction_id: *direction_id,
+                            destination,
+                            latitude: lat,
+                            longitude: lon,
+                            stop_id: Some(id.clone()),
+                            timestamp: *time,
+                            delay: *delay,
+                        });
                     }
                 }
 
-                // Filter out departed vehicles from real-time data too
+                // Keep arrivals within grace period OR future arrivals
                 stop_rt.retain(|rt| {
                     if let Some(ts) = rt.timestamp {
-                        ts >= now
+                        ts >= cutoff_time
                     } else {
-                        true // Keep if no timestamp
+                        true
                     }
                 });
 
                 // Sort by timestamp
                 stop_rt.sort_by_key(|rt| rt.timestamp.unwrap_or(i64::MAX));
 
-                // Filter alerts by stop_id
+                // OPTIONAL: Limit to next N arrivals to avoid overwhelming UI
+                const MAX_ARRIVALS_PER_STOP: usize = 10;
+                if stop_rt.len() > MAX_ARRIVALS_PER_STOP {
+                    stop_rt.truncate(MAX_ARRIVALS_PER_STOP);
+                }
+
                 let stop_alerts: Vec<AlertInfo> = alerts
                     .iter()
-                    .filter(|alert| {
-                        alert.stop_ids.contains(&id)
-                    })
+                    .filter(|alert| alert.stop_ids.contains(&id))
                     .cloned()
                     .collect();
 
@@ -972,23 +955,14 @@ impl NVTModels {
                     .cloned()
                     .unwrap_or_else(|| "808080".to_string());
 
-                // Filter alerts by route_id (using line_code from GTFS alerts)
                 let line_alerts: Vec<AlertInfo> = alerts
                     .iter()
                     .filter(|alert| {
-                        // Check if this alert affects this line
-                        // Alert route_ids are in format "07", "460", etc.
-                        // We need to match against line_code
                         alert.route_ids.contains(&code) ||
                             alert.route_ids.contains(&line_id.to_string())
                     })
                     .cloned()
                     .collect();
-
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64;
 
                 let mut line_rt: Vec<RealTimeInfo> = real_time
                     .iter()
@@ -999,9 +973,8 @@ impl NVTModels {
                             .unwrap_or(false)
                     })
                     .filter(|rt| {
-                        // Only include vehicles that haven't departed yet
                         if let Some(ts) = rt.timestamp {
-                            ts >= now
+                            ts >= cutoff_time
                         } else {
                             true
                         }
@@ -1026,9 +999,7 @@ impl NVTModels {
         NetworkData { stops, lines }
     }
 
-    /// Extract stop ID from full reference (fixed logic)
     fn extract_stop_id(full_id: &str) -> Option<String> {
-        // Handle format: "StopPoint:bordeaux:BP:XXXX:LOC" or just "XXXX"
         if full_id.contains("BP:") {
             full_id
                 .split("BP:")
@@ -1037,7 +1008,6 @@ impl NVTModels {
                 .next()
                 .map(String::from)
         } else if full_id.contains(':') {
-            // Try to extract last meaningful part before :LOC
             let parts: Vec<&str> = full_id.split(':').collect();
             if parts.len() >= 2 {
                 Some(parts[parts.len() - 2].to_string())
@@ -1049,15 +1019,9 @@ impl NVTModels {
         }
     }
 
-    /// Extract line ID from line reference
     pub fn extract_line_id(line_ref: &str) -> Option<&str> {
-        // Format: "Line:bordeaux:LINE_ID:LOC"
         line_ref.split(':').nth(2)
     }
-
-    // ========================================================================
-    // Public Query Methods
-    // ========================================================================
 
     pub fn get_line_color(line_code: &str, network: &NetworkData) -> String {
         network

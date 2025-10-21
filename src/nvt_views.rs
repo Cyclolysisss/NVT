@@ -106,19 +106,38 @@ impl NVTViews {
     }
 
     /// Show stop choices when multiple matches
-    pub fn show_stop_choices(stops: &[&Stop]) {
+    /// Show stop choices when multiple matches
+    pub fn show_stop_choices(stops: &[&Stop], network: &NetworkData) {
         println!("\n📍 Multiple stops found. Please choose:");
         println!("{}", "─".repeat(60));
         for (i, stop) in stops.iter().enumerate() {
             println!("  {}. {} (ID: {})", i + 1, stop.stop_name, stop.stop_id);
             println!("     📌 ({:.6}, {:.6})", stop.latitude, stop.longitude);
+
+            // Add lines information
+            if !stop.lines.is_empty() {
+                let line_codes: Vec<String> = stop.lines.iter()
+                    .filter_map(|line_ref| {
+                        network.lines.iter()
+                            .find(|l| &l.line_ref == line_ref)
+                            .map(|l| Self::colorize_line(&l.line_code, &l.color))
+                    })
+                    .take(10)
+                    .collect();
+
+                print!("     🚌 Lines: {}", line_codes.join(" "));
+                if stop.lines.len() > 10 {
+                    print!(" (+{} more)", stop.lines.len() - 10);
+                }
+                println!();
+            }
+
             if i < stops.len() - 1 {
                 println!();
             }
         }
         println!("{}", "─".repeat(60));
     }
-
     /// Show line suggestions with better formatting
     pub fn show_line_suggestions(lines: &[&Line]) {
         println!("\n💡 Did you mean one of these lines?");

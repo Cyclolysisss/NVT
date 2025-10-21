@@ -35,9 +35,9 @@ impl NVTControllers {
         let mut selected_stop: Option<String> = None;
 
         loop {
-            let network = cache.to_network_data();
-            NVTViews::show_menu();
 
+            NVTViews::show_menu();
+            let network = cache.to_network_data();
             let choice = Self::read_input();
 
             match choice.trim() {
@@ -198,7 +198,7 @@ impl NVTControllers {
 
         // Handle selection
         let selected_stop = if filtered_stops.len() > 1 {
-            NVTViews::show_stop_choices(&filtered_stops);
+            NVTViews::show_stop_choices(&filtered_stops, network);
             Self::select_from_list(&filtered_stops)
         } else {
             Some(filtered_stops[0])
@@ -261,7 +261,7 @@ impl NVTControllers {
             Self::clear_screen();
             Self::display_refresh_header(refresh_count, cache);
 
-            let network = cache.to_network_data();
+            let network = cache.to_network_data(); // Make this line not hang out whole program
             Self::display_next_vehicles(&network, &line_ref, &Some(stop_id.clone()));
 
             // Show cache stats
