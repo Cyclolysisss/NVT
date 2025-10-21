@@ -1,4 +1,4 @@
-# 🚊 TBM Next Vehicle - Bordeaux Métropole
+# 🚊 NVT - **N**ext **V**ehicle **T**BM
 
 [![Rust](https://img.shields.io/badge/Rust-100%25-orange?style=flat&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](https://github.com/Cyclolysisss/NVT)
