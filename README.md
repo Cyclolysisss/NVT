@@ -5,8 +5,6 @@
 
 A powerful, real-time transit tracking application for Bordeaux Métropole's public transportation network (TBM). Monitor buses, trams, and BRT lines with live GPS tracking, service alerts, and comprehensive network information.
 
-![TBM Next Vehicle Demo](https://via.placeholder.com/800x400?text=TBM+Next+Vehicle+Screenshot)
-
 ## ✨ Features
 
 ### 🚀 Real-Time Tracking
