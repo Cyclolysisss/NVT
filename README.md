@@ -26,9 +26,11 @@ A powerful, real-time transit tracking application for Bordeaux Métropole's pub
 - **Optimized Performance**: Separate static and dynamic data management
 
 ### 🎨 User-Friendly Interface
+- **Modern GUI**: Cross-platform graphical interface with egui/eframe
+- **CLI Option**: Classic terminal interface still available with `--cli` flag
 - **Colorized Output**: Line codes displayed in official TBM colors
-- **Intuitive Navigation**: Simple numbered menu system
-- **Smart Search**: Partial name matching for stops and lines
+- **Intuitive Navigation**: Simple tab-based (GUI) or numbered menu (CLI) system
+- **Smart Search**: Live filtering for stops and lines
 - **Rich Information Display**: Detailed vehicle, stop, and line information
 
 ## 📋 Table of Contents
@@ -58,30 +60,71 @@ cd NVT
 # Build the project
 cargo build --release
 
-# Run the application
+# Run the application (GUI mode)
 cargo run --release
+
+# Or run in CLI mode
+cargo run --release -- --cli
 ```
+
+**Note**: The GUI requires a graphical environment. For headless servers or SSH sessions, use the CLI mode with the `--cli` flag.
 
 ### Binary Installation
 
 Download the latest pre-built binary from the [Releases](https://github.com/Cyclolysisss/NVT/releases) page.
 
 ```bash
-# Linux/macOS
+# Linux/macOS - GUI mode (default)
 chmod +x nvt
 ./nvt
 
-# Windows
+# Linux/macOS - CLI mode
+./nvt --cli
+
+# Windows - GUI mode (default)
 nvt.exe
+
+# Windows - CLI mode
+nvt.exe --cli
 ```
 
 ## 🚀 Usage
 
-### Quick Start
+### GUI Mode (Default)
 
-1. **Launch the application**
+The application now features a modern graphical user interface built with egui/eframe.
+
+1. **Launch the GUI**
    ```bash
    cargo run --release
+   # or simply
+   ./nvt
+   ```
+
+2. **Navigate using the sidebar:**
+   - **📍 Select Line**: Search and filter lines by code or name
+   - **🚏 Select Stop**: Search stops, with automatic filtering by selected line
+   - **🔄 Real-Time Arrivals**: View live vehicle arrivals with auto-refresh
+   - **📋 All Stops**: Browse all stops with pagination
+   - **🚌 All Lines**: Browse all lines grouped by type (Trams/BRT vs Buses)
+   - **📊 Cache Stats**: View cache status and refresh manually
+
+3. **Key Features:**
+   - **Color-coded line badges**: Official TBM colors for easy identification
+   - **Auto-refresh**: Real-time arrivals update every 30 seconds
+   - **Smart filtering**: Search stops by name or filter by selected line
+   - **Live status indicators**: Color-coded countdown (green/orange/red)
+   - **Service alerts**: Automatically displayed for selected lines/stops
+
+### CLI Mode (Terminal Interface)
+
+For terminal enthusiasts, the classic CLI interface is still available.
+
+1. **Launch the CLI**
+   ```bash
+   cargo run --release -- --cli
+   # or
+   ./nvt --cli
    ```
 
 2. **Select a line** (Option 1)
@@ -97,7 +140,7 @@ nvt.exe
     - Auto-refreshes every 30 seconds
     - Press Enter to exit refresh mode
 
-### Menu Options
+### CLI Menu Options
 
 ```
 📋 MENU OPTIONS
@@ -110,7 +153,28 @@ nvt.exe
   0️⃣  Quit application
 ```
 
-### Example Workflow
+### Example Workflow (GUI Mode)
+
+1. Launch the application (opens GUI by default)
+2. Click "📍 Select Line" in the sidebar
+3. Type "A" in the search box to find Tram A
+4. Click "Select" on the Tram A card
+5. Click "🚏 Select Stop" in the sidebar
+6. Search for "hotel de ville" to find the stop
+7. Click "Select" on the Hôtel de Ville stop
+8. Click "🔄 Real-Time Arrivals" to see live vehicles
+9. Enable "Auto-refresh (30s)" checkbox for continuous updates
+
+The GUI displays:
+- Line badge with official color
+- Direction and destination
+- Arrival time and countdown (color-coded: green for later, orange for soon, red for imminent)
+- Delay status (on time, early, or delayed)
+- Data source (GPS tracking vs scheduled)
+- Vehicle ID if available
+- Active service alerts
+
+### Example Workflow (CLI Mode)
 
 ```
 ➜ Select Option: 1
@@ -186,10 +250,11 @@ The application uses official TBM (Transports Bordeaux Métropole) data sources:
 ```
 NVT/
 ├── src/
-│   ├── main.rs              # Application entry point & error handling
+│   ├── main.rs              # Application entry point & mode selection
 │   ├── nvt_models.rs        # Data models & API fetching
-│   ├── nvt_views.rs         # User interface & display logic
-│   └── nvt_controllers.rs   # Business logic & app flow
+│   ├── nvt_views.rs         # CLI views & display logic
+│   ├── nvt_controllers.rs   # CLI business logic & app flow
+│   └── nvt_gui.rs          # GUI implementation (egui/eframe)
 ├── Cargo.toml               # Dependencies & metadata
 └── README.md
 ```
@@ -202,17 +267,25 @@ NVT/
 - **Caching System**: Intelligent cache management
 - **GTFS Processing**: Handles GTFS-RT protobuf decoding
 
-#### `nvt_views.rs` - Presentation Layer
+#### `nvt_views.rs` - CLI Presentation Layer
 - **UI Components**: Menus, prompts, and formatted output
 - **Color Rendering**: ANSI color codes for line branding
 - **Information Display**: Vehicle, stop, and line information
 - **Error Messages**: User-friendly error handling
 
-#### `nvt_controllers.rs` - Business Logic
+#### `nvt_controllers.rs` - CLI Business Logic
 - **Application Flow**: Main menu loop and navigation
 - **Selection Handling**: Line and stop selection logic
 - **Auto-Refresh**: Real-time update mechanism
 - **Input Processing**: User input validation and parsing
+
+#### `nvt_gui.rs` - GUI Implementation
+- **Modern UI**: egui/eframe immediate mode GUI
+- **State Management**: Application state and caching
+- **Async Loading**: Non-blocking data initialization
+- **Auto-Refresh**: Background updates every 30 seconds
+- **Color Rendering**: Hex color parsing for line badges
+- **Navigation**: Tab-based interface with multiple views
 
 ### Design Patterns
 
@@ -254,16 +327,23 @@ const DYNAMIC_DATA_MAX_AGE: u64 = 30;  // 30 seconds
 
 ```toml
 [dependencies]
+# Data fetching and processing
 reqwest = { version = "0.11", features = ["blocking"] }  # HTTP client
 serde = { version = "1.0", features = ["derive"] }       # Serialization
 serde_json = "1.0"                                        # JSON parsing
-gtfs-rt = "0.4"                                          # GTFS-RT decoder
-prost = "0.12"                                           # Protobuf support
+gtfs-rt = "0.5"                                          # GTFS-RT decoder
+prost = "0.11"                                           # Protobuf support
 chrono = "0.4"                                           # Date/time handling
 chrono-tz = "0.8"                                        # Timezone support
-csv = "1.3"                                              # CSV parsing
+csv = "1.4"                                              # CSV parsing
 zip = "0.6"                                              # GTFS archive extraction
-dirs = "5.0"                                             # System directories
+dirs = "6.0"                                             # System directories
+
+# GUI framework
+eframe = "0.28"                                          # GUI framework
+egui = "0.28"                                            # Immediate mode GUI
+egui_extras = "0.28"                                     # Extra widgets
+poll-promise = "0.3"                                     # Async operations
 ```
 
 ## 🤝 Contributing
@@ -308,15 +388,25 @@ Contributions are welcome! Please follow these guidelines:
 
 ## 🗺️ Roadmap
 
+### Recent Additions ✨
+
+- [x] **GUI Mode**: Modern graphical interface with egui/eframe
+- [x] **Dual Interface**: Both GUI and CLI modes available
+- [x] **Color-Coded UI**: Official TBM line colors in GUI
+- [x] **Auto-Refresh**: Background updates in real-time view
+- [x] **Smart Filtering**: Live search and filtering
+
 ### Planned Features
 
-- [ ] Offline mode with cached data and schedulded trips
+- [ ] Offline mode with cached data and scheduled trips
 - [ ] Trip planning functionality
-- [ ] Favorite stops/lines
-- [ ] Notifications for specific arrivals
+- [ ] Favorite stops/lines (with persistence)
+- [ ] Desktop notifications for specific arrivals
 - [ ] Export data to CSV/JSON
 - [ ] Historical data analysis
 - [ ] Multi-city support
+- [ ] Dark/light theme toggle in GUI
+- [ ] Keyboard shortcuts for common actions
 
 ### Known Limitations
 

@@ -31,3 +31,9 @@ zip = "0.6"
 tempfile = "3.0"
 dirs = "6.0.0"
 libc = "0.2.177"
+
+# GUI dependencies
+eframe = "0.28"
+egui = "0.28"
+egui_extras = { version = "0.28", features = ["default"] }
+poll-promise = "0.3"
