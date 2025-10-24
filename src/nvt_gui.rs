@@ -442,47 +442,78 @@ impl NVTApp {
         
         ui.separator();
         
-        if self.selected_line.is_none() || self.selected_stop.is_none() {
+        // Only require a stop to be selected (line is optional)
+        if self.selected_stop.is_none() {
             ui.centered_and_justified(|ui| {
-                ui.label("Please select both a line and a stop to view real-time arrivals.");
+                ui.label("Please select a stop to view real-time arrivals.");
+                ui.label("Optionally select a line to filter results.");
             });
             return;
         }
         
         // Clone network data and selection to avoid borrowing issues
         let network_opt = self.network.lock().unwrap().clone();
-        let line_ref = self.selected_line.clone().unwrap();
+        let line_ref_opt = self.selected_line.clone();
         let stop_id = self.selected_stop.clone().unwrap();
         
         egui::ScrollArea::vertical().show(ui, |ui| {
             if let Some(network) = network_opt.as_ref() {
-                // Find the line and stop
-                let line = network.lines.iter().find(|l| l.line_ref == line_ref);
+                // Find the stop
                 let stop = network.stops.iter().find(|s| s.stop_id == stop_id);
                 
-                if let (Some(line), Some(stop)) = (line, stop) {
-                    ui.strong(format!("Line {} at {}", line.line_code, stop.stop_name));
+                if let Some(stop) = stop {
+                    // Display header based on whether a line is selected
+                    if let Some(line_ref) = &line_ref_opt {
+                        if let Some(line) = network.lines.iter().find(|l| &l.line_ref == line_ref) {
+                            ui.strong(format!("Line {} at {}", line.line_code, stop.stop_name));
+                        }
+                    } else {
+                        ui.strong(format!("All lines at {}", stop.stop_name));
+                    }
                     ui.add_space(10.0);
                     
-                    // Show alerts
-                    if !stop.alerts.is_empty() || !line.alerts.is_empty() {
+                    // Show alerts for the stop and selected line (if any)
+                    let mut has_alerts = false;
+                    if !stop.alerts.is_empty() {
+                        has_alerts = true;
+                    }
+                    if let Some(line_ref) = &line_ref_opt {
+                        if let Some(line) = network.lines.iter().find(|l| &l.line_ref == line_ref) {
+                            if !line.alerts.is_empty() {
+                                has_alerts = true;
+                            }
+                        }
+                    }
+                    
+                    if has_alerts {
                         ui.group(|ui| {
                             ui.colored_label(Color32::from_rgb(255, 165, 0), "⚠️ Active Alerts");
                             for alert in &stop.alerts {
                                 ui.label(format!("• {}", alert.text));
                             }
-                            for alert in &line.alerts {
-                                if !alert.stop_ids.is_empty() && !alert.stop_ids.contains(&stop_id) {
-                                    continue; // Skip alerts not relevant to this stop
+                            if let Some(line_ref) = &line_ref_opt {
+                                if let Some(line) = network.lines.iter().find(|l| &l.line_ref == line_ref) {
+                                    for alert in &line.alerts {
+                                        if !alert.stop_ids.is_empty() && !alert.stop_ids.contains(&stop_id) {
+                                            continue; // Skip alerts not relevant to this stop
+                                        }
+                                        ui.label(format!("• {}", alert.text));
+                                    }
                                 }
-                                ui.label(format!("• {}", alert.text));
                             }
                         });
                         ui.add_space(10.0);
                     }
                     
-                    // Show next vehicles
-                    let vehicles = Self::get_next_vehicles(&network, &line_ref, &stop_id);
+                    // Get vehicles for all lines serving this stop, or just the selected line
+                    let vehicles = if let Some(line_ref) = &line_ref_opt {
+                        // Filter by selected line
+                        Self::get_next_vehicles(&network, line_ref, &stop_id)
+                    } else {
+                        // Get vehicles for all lines serving this stop
+                        Self::get_all_vehicles_at_stop(&network, &stop_id)
+                    };
+                    
                     if vehicles.is_empty() {
                         ui.label("No upcoming vehicles found.");
                         ui.label("This could mean:");
@@ -490,12 +521,14 @@ impl NVTApp {
                         ui.label("• Service has ended for the day");
                         ui.label("• Real-time data is temporarily unavailable");
                     } else {
-                        for (idx, (vehicle, destination)) in vehicles.iter().enumerate() {
-                            self.show_vehicle_card(ui, line, vehicle, destination, idx + 1);
+                        for (idx, (line_ref, vehicle, destination)) in vehicles.iter().enumerate() {
+                            if let Some(line) = network.lines.iter().find(|l| &l.line_ref == line_ref) {
+                                self.show_vehicle_card(ui, line, vehicle, destination, idx + 1);
+                            }
                         }
                     }
                 } else {
-                    ui.label("Error: Selected line or stop not found.");
+                    ui.label("Error: Selected stop not found.");
                 }
             }
         });
@@ -551,9 +584,12 @@ impl NVTApp {
                         ui.label(status_text);
                     }
                     
-                    // Data source
-                    if vehicle.timestamp.is_some() {
+                    // Data source - check if we have GPS coordinates (real-time) or just timestamp (scheduled)
+                    let has_gps = vehicle.latitude != 0.0 || vehicle.longitude != 0.0;
+                    if has_gps && vehicle.timestamp.is_some() {
                         ui.label("📊 Source: Real-time GPS tracking");
+                    } else if vehicle.timestamp.is_some() {
+                        ui.label("📊 Source: Real-time prediction");
                     } else {
                         ui.label("📊 Source: Scheduled data");
                     }
@@ -568,24 +604,49 @@ impl NVTApp {
         ui.add_space(5.0);
     }
     
-    fn get_next_vehicles(network: &NetworkData, line_ref: &str, stop_id: &str) -> Vec<(RealTimeInfo, String)> {
-        let mut vehicles: Vec<(RealTimeInfo, String)> = Vec::new();
+    fn get_next_vehicles(network: &NetworkData, line_ref: &str, stop_id: &str) -> Vec<(String, RealTimeInfo, String)> {
+        let mut vehicles: Vec<(String, RealTimeInfo, String)> = Vec::new();
         
         // Get vehicles from real-time data
         if let Some(line) = network.lines.iter().find(|l| l.line_ref == line_ref) {
             for vehicle in &line.real_time {
                 if vehicle.stop_id.as_ref().map(|s| s.as_str()) == Some(stop_id) {
                     let dest = vehicle.destination.clone().unwrap_or_else(|| "Unknown".to_string());
-                    vehicles.push((vehicle.clone(), dest));
+                    vehicles.push((line_ref.to_string(), vehicle.clone(), dest));
                 }
             }
         }
         
         // Sort by timestamp
-        vehicles.sort_by_key(|(v, _)| v.timestamp.unwrap_or(i64::MAX));
+        vehicles.sort_by_key(|(_, v, _)| v.timestamp.unwrap_or(i64::MAX));
         
         // Take next 5 vehicles
         vehicles.into_iter().take(5).collect()
+    }
+    
+    fn get_all_vehicles_at_stop(network: &NetworkData, stop_id: &str) -> Vec<(String, RealTimeInfo, String)> {
+        let mut vehicles: Vec<(String, RealTimeInfo, String)> = Vec::new();
+        
+        // Get the stop to find which lines serve it
+        if let Some(stop) = network.stops.iter().find(|s| s.stop_id == stop_id) {
+            // Iterate through all lines serving this stop
+            for line_ref in &stop.lines {
+                if let Some(line) = network.lines.iter().find(|l| &l.line_ref == line_ref) {
+                    for vehicle in &line.real_time {
+                        if vehicle.stop_id.as_ref().map(|s| s.as_str()) == Some(stop_id) {
+                            let dest = vehicle.destination.clone().unwrap_or_else(|| "Unknown".to_string());
+                            vehicles.push((line_ref.clone(), vehicle.clone(), dest));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Sort by timestamp
+        vehicles.sort_by_key(|(_, v, _)| v.timestamp.unwrap_or(i64::MAX));
+        
+        // Take next 10 vehicles (more since we're showing all lines)
+        vehicles.into_iter().take(10).collect()
     }
     
     fn show_all_stops_browser(&mut self, ui: &mut Ui) {
